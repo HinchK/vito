@@ -27,15 +27,6 @@
                 }
                 editor.getSession().setMode(`ace/mode/${this.lang}`)
                 editor.setTheme(`ace/theme/${theme}`)
-                editor.setFontSize('15px')
-                editor.setShowPrintMargin(false)
-                editor.on('change', () => {
-                    contentElement.innerHTML = editor.getValue()
-                })
-                document.body.addEventListener('color-scheme-changed', (event) => {
-                    theme = event.detail.theme === 'dark' ? 'one-dark' : 'github'
-                    editor.setTheme(`ace/theme/${theme}`)
-                })
             })
         },
     }"
