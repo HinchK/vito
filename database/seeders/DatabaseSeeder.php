@@ -22,6 +22,7 @@ class DatabaseSeeder extends Seeder
         ]);
         $server = Server::factory()->create([
             'user_id' => $user->id,
+            'project_id' => $user->currentProject->id,
         ]);
         $server->services()->create([
             'type' => 'database',
@@ -41,6 +42,12 @@ class DatabaseSeeder extends Seeder
         $server->services()->create([
             'type' => 'webserver',
             'name' => 'nginx',
+            'version' => 'latest',
+            'status' => ServiceStatus::READY,
+        ]);
+        $server->services()->create([
+            'type' => 'firewall',
+            'name' => 'ufw',
             'version' => 'latest',
             'status' => ServiceStatus::READY,
         ]);

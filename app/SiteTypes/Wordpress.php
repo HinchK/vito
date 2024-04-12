@@ -2,14 +2,14 @@
 
 namespace App\SiteTypes;
 
-use App\Enums\SiteStatus;
-use App\Events\Broadcast;
-use App\Jobs\Site\CreateVHost;
-use App\Jobs\Site\InstallWordpress;
-use App\SSHCommands\Wordpress\UpdateWordpressCommand;
-use Illuminate\Support\Facades\Bus;
-use Illuminate\Support\Facades\Log;
-use Throwable;
+use App\Actions\Database\CreateDatabase;
+use App\Actions\Database\CreateDatabaseUser;
+use App\Actions\Database\LinkUser;
+use App\Enums\SiteFeature;
+use App\Models\Database;
+use App\Models\DatabaseUser;
+use Closure;
+use Illuminate\Validation\Rule;
 
 class Wordpress extends AbstractSiteType
 {
@@ -18,155 +18,100 @@ class Wordpress extends AbstractSiteType
         return 'php';
     }
 
-    public function createValidationRules(array $input): array
+    public function supportedFeatures(): array
     {
         return [
+            SiteFeature::SSL,
+        ];
+    }
+
+    public function createRules(array $input): array
+    {
+        return [
+            'php_version' => [
+                'required',
+                Rule::in($this->site->server->installedPHPVersions()),
+            ],
             'title' => 'required',
             'username' => 'required',
             'password' => 'required',
             'email' => 'required|email',
-            'database' => 'required',
-            'database_user' => 'required',
+            'database' => [
+                'required',
+                Rule::unique('databases', 'name')->where(function ($query) {
+                    return $query->where('server_id', $this->site->server_id);
+                }),
+                function (string $attribute, mixed $value, Closure $fail) {
+                    if (! $this->site->server->database()) {
+                        $fail(__('Database is not installed'));
+                    }
+                },
+            ],
+            'database_user' => [
+                'required',
+                Rule::unique('database_users', 'username')->where(function ($query) {
+                    return $query->where('server_id', $this->site->server_id);
+                }),
+            ],
+            'database_password' => 'required',
         ];
     }
 
     public function createFields(array $input): array
     {
         return [
-            'web_directory' => $input['web_directory'] ?? '',
+            'web_directory' => '',
+            'php_version' => $input['php_version'],
         ];
     }
 
     public function data(array $input): array
     {
-        $data = $this->site->type_data;
-        $data['url'] = $this->site->url;
-        if (isset($input['title']) && $input['title']) {
-            $data['title'] = $input['title'];
-        }
-        if (isset($input['username']) && $input['username']) {
-            $data['username'] = $input['username'];
-        }
-        if (isset($input['email']) && $input['email']) {
-            $data['email'] = $input['email'];
-        }
-        if (isset($input['password']) && $input['password']) {
-            $data['password'] = $input['password'];
-        }
-        if (isset($input['database']) && $input['database']) {
-            $data['database'] = $input['database'];
-        }
-        if (isset($input['database_user']) && $input['database_user']) {
-            $data['database_user'] = $input['database_user'];
-        }
-        if (isset($input['url']) && $input['url']) {
-            $data['url'] = $input['url'];
-        }
-
-        return $data;
+        return [
+            'url' => $this->site->getUrl(),
+            'title' => $input['title'],
+            'username' => $input['username'],
+            'email' => $input['email'],
+            'password' => $input['password'],
+            'database' => $input['database'],
+            'database_user' => $input['database_user'],
+            'database_password' => $input['database_password'],
+        ];
     }
 
     public function install(): void
     {
-        $chain = [
-            new CreateVHost($this->site),
-            $this->progress(30),
-            new InstallWordpress($this->site),
-            $this->progress(65),
-            function () {
-                $this->site->php()?->restart();
-            },
-        ];
-
-        $chain[] = function () {
-            $this->site->update([
-                'status' => SiteStatus::READY,
-                'progress' => 100,
-            ]);
-            event(
-                new Broadcast('install-site-finished', [
-                    'site' => $this->site,
-                ])
-            );
-            /** @todo notify */
-        };
-
-        Bus::chain($chain)
-            ->catch(function (Throwable $e) {
-                $this->site->update([
-                    'status' => SiteStatus::INSTALLATION_FAILED,
-                ]);
-                event(
-                    new Broadcast('install-site-failed', [
-                        'site' => $this->site,
-                    ])
-                );
-                /** @todo notify */
-                Log::error('install-site-error', [
-                    'error' => (string) $e,
-                ]);
-                throw $e;
-            })
-            ->onConnection('ssh-long')
-            ->dispatch();
+        $this->site->server->webserver()->handler()->createVHost($this->site);
+        $this->progress(30);
+        /** @var Database $database */
+        $database = app(CreateDatabase::class)->create($this->site->server, [
+            'name' => $this->site->type_data['database'],
+        ]);
+        /** @var DatabaseUser $databaseUser */
+        $databaseUser = app(CreateDatabaseUser::class)->create($this->site->server, [
+            'username' => $this->site->type_data['database_user'],
+            'password' => $this->site->type_data['database_password'],
+            'remote' => false,
+            'host' => 'localhost',
+        ], [$database->name]);
+        app(LinkUser::class)->link($databaseUser, [
+            'databases' => [$database->name],
+        ]);
+        $this->site->php()?->restart();
+        $this->progress(60);
+        app(\App\SSH\Wordpress\Wordpress::class)->install($this->site);
     }
 
-    public function editValidationRules(array $input): array
+    public function editRules(array $input): array
     {
         return [
             'title' => 'required',
             'url' => 'required',
-            // 'email' => 'required|email',
         ];
     }
 
     public function edit(): void
     {
-        $this->site->status = 'installing';
-        $this->site->progress = 90;
-        $this->site->save();
-        $chain = [
-            function () {
-                $this->site->server->ssh()->exec(
-                    new UpdateWordpressCommand(
-                        $this->site->path,
-                        $this->site->type_data['url'],
-                        $this->site->type_data['username'] ?? '',
-                        $this->site->type_data['password'] ?? '',
-                        $this->site->type_data['email'] ?? '',
-                        $this->site->type_data['title'] ?? '',
-                    ),
-                    'update-wordpress',
-                    $this->site->id
-                );
-                $this->site->update([
-                    'status' => SiteStatus::READY,
-                ]);
-                event(
-                    new Broadcast('install-site-finished', [
-                        'site' => $this->site,
-                    ])
-                );
-            },
-        ];
-
-        Bus::chain($chain)
-            ->catch(function (Throwable $e) {
-                $this->site->update([
-                    'status' => SiteStatus::INSTALLATION_FAILED,
-                ]);
-                event(
-                    new Broadcast('install-site-failed', [
-                        'site' => $this->site,
-                    ])
-                );
-                /** @todo notify */
-                Log::error('install-site-error', [
-                    'error' => (string) $e,
-                ]);
-                throw $e;
-            })
-            ->onConnection('ssh')
-            ->dispatch();
+        //
     }
 }

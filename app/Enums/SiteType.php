@@ -2,13 +2,15 @@
 
 namespace App\Enums;
 
-use BenSampo\Enum\Enum;
-
-final class SiteType extends Enum
+final class SiteType
 {
     const PHP = 'php';
+
+    const PHP_BLANK = 'php-blank';
 
     const LARAVEL = 'laravel';
 
     const WORDPRESS = 'wordpress';
+
+    const PHPMYADMIN = 'phpmyadmin';
 }

@@ -2,8 +2,9 @@
 
 namespace App\Helpers;
 
-use App\Contracts\SSHCommand;
 use App\Exceptions\SSHAuthenticationError;
+use App\Exceptions\SSHCommandError;
+use App\Exceptions\SSHConnectionError;
 use App\Models\Server;
 use App\Models\ServerLog;
 use Exception;
@@ -21,7 +22,7 @@ class SSH
 
     public ?ServerLog $log;
 
-    protected SSH2|SFTP|null $connection;
+    protected SSH2|SFTP|null $connection = null;
 
     protected ?string $user;
 
@@ -31,14 +32,14 @@ class SSH
 
     protected PrivateKey $privateKey;
 
-    public function init(Server $server, string $asUser = null): self
+    public function init(Server $server, ?string $asUser = null): self
     {
         $this->connection = null;
         $this->log = null;
         $this->asUser = null;
         $this->server = $server->refresh();
-        $this->user = $server->ssh_user;
-        if ($asUser && $asUser != $server->ssh_user) {
+        $this->user = $server->getSshUser();
+        if ($asUser && $asUser != $server->getSshUser()) {
             $this->user = $asUser;
             $this->asUser = $asUser;
         }
@@ -49,7 +50,7 @@ class SSH
         return $this;
     }
 
-    public function setLog(string $logType, $siteId = null): void
+    public function setLog(string $logType, $siteId = null): self
     {
         $this->log = $this->server->logs()->create([
             'site_id' => $siteId,
@@ -57,6 +58,8 @@ class SSH
             'type' => $logType,
             'disk' => config('core.logs_disk'),
         ]);
+
+        return $this;
     }
 
     /**
@@ -64,11 +67,16 @@ class SSH
      */
     public function connect(bool $sftp = false): void
     {
+        // If the IP is an IPv6 address, we need to wrap it in square brackets
+        $ip = $this->server->ip;
+        if (str($ip)->contains(':')) {
+            $ip = '['.$ip.']';
+        }
         try {
             if ($sftp) {
-                $this->connection = new SFTP($this->server->ip, $this->server->port);
+                $this->connection = new SFTP($ip, $this->server->port);
             } else {
-                $this->connection = new SSH2($this->server->ip, $this->server->port);
+                $this->connection = new SSH2($ip, $this->server->port);
             }
 
             $login = $this->connection->login($this->user, $this->privateKey);
@@ -80,14 +88,15 @@ class SSH
             Log::error('Error connecting', [
                 'msg' => $e->getMessage(),
             ]);
-            throw $e;
+            throw new SSHConnectionError($e->getMessage());
         }
     }
 
     /**
-     * @throws Throwable
+     * @throws SSHCommandError
+     * @throws SSHConnectionError
      */
-    public function exec(string|array|SSHCommand $commands, string $log = '', int $siteId = null): string
+    public function exec(string $command, string $log = '', ?int $siteId = null, ?bool $stream = false): string
     {
         if ($log) {
             $this->setLog($log, $siteId);
@@ -95,20 +104,44 @@ class SSH
             $this->log = null;
         }
 
-        if (! $this->connection) {
-            $this->connect();
+        try {
+            if (! $this->connection) {
+                $this->connect();
+            }
+        } catch (Throwable $e) {
+            throw new SSHConnectionError($e->getMessage());
         }
 
-        if (! is_array($commands)) {
-            $commands = [$commands];
-        }
+        try {
+            if ($this->asUser) {
+                $command = 'sudo su - '.$this->asUser.' -c '.'"'.addslashes($command).'"';
+            }
 
-        $result = '';
-        foreach ($commands as $command) {
-            $result .= $this->executeCommand($command);
-        }
+            $this->connection->setTimeout(0);
+            if ($stream) {
+                $this->connection->exec($command, function ($output) {
+                    $this->log?->write($output);
+                    echo $output;
+                    ob_flush();
+                    flush();
+                });
 
-        return $result;
+                return '';
+            } else {
+                $output = $this->connection->exec($command);
+
+                $this->log?->write($output);
+
+                if (Str::contains($output, 'VITO_SSH_ERROR')) {
+                    throw new Exception('SSH command failed with an error');
+                }
+
+                return $output;
+            }
+        } catch (Throwable $e) {
+            throw $e;
+            throw new SSHCommandError($e->getMessage());
+        }
     }
 
     /**
@@ -127,37 +160,19 @@ class SSH
     /**
      * @throws Exception
      */
-    protected function executeCommand(string|SSHCommand $command): string
-    {
-        if ($command instanceof SSHCommand) {
-            $commandContent = $command->content();
-        } else {
-            $commandContent = $command;
-        }
-
-        if ($this->asUser) {
-            $commandContent = 'sudo su - '.$this->asUser.' -c '.'"'.addslashes($commandContent).'"';
-        }
-
-        $output = $this->connection->exec($commandContent);
-
-        $this->log?->write($output);
-
-        if (Str::contains($output, 'VITO_SSH_ERROR')) {
-            throw new Exception('SSH command failed with an error');
-        }
-
-        return $output;
-    }
-
-    /**
-     * @throws Exception
-     */
     public function disconnect(): void
     {
         if ($this->connection) {
             $this->connection->disconnect();
             $this->connection = null;
         }
+    }
+
+    /**
+     * @throws Exception
+     */
+    public function __destruct()
+    {
+        $this->disconnect();
     }
 }

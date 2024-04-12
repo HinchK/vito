@@ -4,8 +4,11 @@ namespace App\Actions\Site;
 
 use App\Enums\SiteStatus;
 use App\Exceptions\SourceControlIsNotConnected;
+use App\Facades\Notifier;
 use App\Models\Server;
 use App\Models\Site;
+use App\Notifications\SiteInstallationFailed;
+use App\Notifications\SiteInstallationSucceed;
 use App\ValidationRules\DomainRule;
 use Exception;
 use Illuminate\Support\Facades\DB;
@@ -23,19 +26,18 @@ class CreateSite
     {
         $this->validateInputs($server, $input);
 
+        DB::beginTransaction();
         try {
-            DB::beginTransaction();
-
             $site = new Site([
                 'server_id' => $server->id,
                 'type' => $input['type'],
                 'domain' => $input['domain'],
                 'aliases' => isset($input['alias']) ? [$input['alias']] : [],
-                'path' => '/home/'.$server->ssh_user.'/'.$input['domain'],
+                'path' => '/home/'.$server->getSshUser().'/'.$input['domain'],
                 'status' => SiteStatus::INSTALLING,
             ]);
 
-            // fields based on type
+            // fields based on the type
             $site->fill($site->type()->createFields($input));
 
             // check has access to repository
@@ -47,11 +49,6 @@ class CreateSite
                 throw ValidationException::withMessages([
                     'source_control' => __('Source control is not connected'),
                 ]);
-            }
-
-            // detect php version
-            if ($site->type()->language() === 'php') {
-                $site->php_version = $input['php_version'];
             }
 
             // validate type
@@ -69,8 +66,19 @@ class CreateSite
                 'content' => '',
             ]);
 
-            // install server
-            $site->install();
+            // install site
+            dispatch(function () use ($site) {
+                $site->type()->install();
+                $site->update([
+                    'status' => SiteStatus::READY,
+                    'progress' => 100,
+                ]);
+                Notifier::send($site, new SiteInstallationSucceed($site));
+            })->catch(function () use ($site) {
+                $site->status = SiteStatus::INSTALLATION_FAILED;
+                $site->save();
+                Notifier::send($site, new SiteInstallationFailed($site));
+            })->onConnection('ssh');
 
             DB::commit();
 
@@ -111,7 +119,7 @@ class CreateSite
      */
     private function validateType(Site $site, array $input): void
     {
-        $rules = $site->type()->createValidationRules($input);
+        $rules = $site->type()->createRules($input);
 
         Validator::make($input, $rules)->validate();
     }

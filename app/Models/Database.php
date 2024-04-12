@@ -2,9 +2,6 @@
 
 namespace App\Models;
 
-use App\Enums\DatabaseStatus;
-use App\Jobs\Database\CreateOnServer;
-use App\Jobs\Database\DeleteFromServer;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -52,24 +49,6 @@ class Database extends AbstractModel
     public function server(): BelongsTo
     {
         return $this->belongsTo(Server::class);
-    }
-
-    /**
-     * create database on server
-     */
-    public function createOnServer(): void
-    {
-        dispatch(new CreateOnServer($this))->onConnection('ssh');
-    }
-
-    /**
-     * delete database from server
-     */
-    public function deleteFromServer(): void
-    {
-        $this->status = DatabaseStatus::DELETING;
-        $this->save();
-        dispatch(new DeleteFromServer($this))->onConnection('ssh');
     }
 
     public function backups(): HasMany

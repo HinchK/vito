@@ -4,7 +4,11 @@
 /public/storage
 /storage/*.key
 /storage/*.pem
+/storage/test-key
+/storage/test-key.pub
 /vendor
+/storage/database.sqlite
+/storage/database-test.sqlite
 .env
 .env.backup
 .env.production

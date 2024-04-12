@@ -1,61 +1,87 @@
-<nav x-data="{ open: false }" class="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
-    <!-- Primary Navigation Menu -->
-    <div class="max-w-7xl mx-auto px-6">
-        <div class="flex justify-between h-16">
-            <div class="flex">
-                <!-- Logo -->
-                <div class="shrink-0 flex items-center">
-                    <x-application-logo class="block h-9 w-auto fill-current text-gray-800 dark:text-gray-200 rounded-lg" />
+<nav
+    class="fixed top-0 z-50 flex h-[64px] w-full items-center border-b border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800"
+>
+    <div class="w-full">
+        <div class="flex items-center justify-between">
+            <div class="flex items-center justify-start">
+                <div
+                    class="flex items-center justify-start border-r border-gray-200 px-3 py-3 dark:border-gray-700 md:w-64"
+                >
+                    <button
+                        data-drawer-target="logo-sidebar"
+                        data-drawer-toggle="logo-sidebar"
+                        aria-controls="logo-sidebar"
+                        type="button"
+                        class="inline-flex items-center rounded-md p-2 text-sm text-gray-500 hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-gray-200 dark:text-gray-400 dark:hover:bg-gray-700 dark:focus:ring-gray-600 sm:hidden"
+                    >
+                        <span class="sr-only">Open sidebar</span>
+                        <x-heroicon name="o-bars-3-center-left" class="h-6 w-6" />
+                    </button>
+                    <a href="/" class="ms-2 flex md:me-24">
+                        <div class="relative flex items-center justify-start text-3xl font-extrabold">
+                            <x-application-logo class="h-9 w-9 rounded-md" />
+                            <span class="ml-1 hidden md:block">Deploy</span>
+                            <span
+                                class="absolute bottom-0 left-0 right-0 rounded-b-md bg-gray-700/60 text-center text-xs text-white md:relative md:ml-1 md:block md:bg-inherit md:text-inherit"
+                            >
+                                {{ vito_version() }}
+                            </span>
+                        </div>
+                    </a>
+                </div>
+                <div class="ml-5 cursor-pointer" x-data="">
+                    <div
+                        class="flex w-full items-center rounded-md border border-gray-200 bg-gray-100 px-4 py-2 text-sm text-gray-900 focus:ring-4 focus:ring-gray-300 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300 dark:focus:ring-gray-600"
+                        @click="$dispatch('open-search')"
+                    >
+                        <x-heroicon name="o-magnifying-glass" class="h-4 w-4" />
+                        <span class="ml-2 hidden lg:block">Press / to Search</span>
+                    </div>
+                </div>
+            </div>
+            <div class="flex items-center px-3 py-3">
+                <div class="mr-3">
+                    @include("layouts.partials.color-scheme")
                 </div>
 
-                <!-- Navigation Links -->
-                <div class="hidden space-x-8 sm:-my-px sm:ml-10 sm:flex">
-                    <x-nav-link :href="route('servers')" :active="request()->routeIs('servers') || request()->is('servers/*')">
-                        {{ __('Servers') }}
-                    </x-nav-link>
-                </div>
-            </div>
+                <x-dropdown align="right" width="48">
+                    <x-slot name="trigger">
+                        <button
+                            class="flex rounded-full text-sm focus:ring-4 focus:ring-gray-300 dark:focus:ring-gray-600"
+                        >
+                            <x-heroicon name="o-cog-6-tooth" class="h-8 w-8 rounded-full" />
+                        </button>
+                    </x-slot>
+                    <x-slot name="content">
+                        <div class="px-4 py-3" role="none">
+                            <p class="text-sm text-gray-900 dark:text-white" role="none">
+                                {{ auth()->user()->name }}
+                            </p>
+                            <p class="truncate text-sm font-medium text-gray-900 dark:text-gray-300" role="none">
+                                {{ auth()->user()->email }}
+                            </p>
+                        </div>
 
-            <!-- Settings Dropdown -->
-            <livewire:user-dropdown />
+                        <x-dropdown-link :href="route('profile')">
+                            {{ __("Profile") }}
+                        </x-dropdown-link>
 
-            <!-- Hamburger -->
-            <div class="-mr-2 flex items-center sm:hidden">
-                <button @click="open = ! open" class="inline-flex items-center justify-center p-2 rounded-md text-gray-400 dark:text-gray-500 hover:text-gray-500 dark:hover:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-900 focus:outline-none focus:bg-gray-100 dark:focus:bg-gray-900 focus:text-gray-500 dark:focus:text-gray-400 transition duration-150 ease-in-out">
-                    <svg class="h-6 w-6" stroke="currentColor" fill="none" viewBox="0 0 24 24">
-                        <path :class="{'hidden': open, 'inline-flex': ! open }" class="inline-flex" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16" />
-                        <path :class="{'hidden': ! open, 'inline-flex': open }" class="hidden" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
-                    </svg>
-                </button>
-            </div>
-        </div>
-    </div>
+                        <x-dropdown-link :href="route('projects')">
+                            {{ __("Projects") }}
+                        </x-dropdown-link>
 
-    <!-- Responsive Navigation Menu -->
-    <div :class="{'block': open, 'hidden': ! open}" class="hidden sm:hidden">
-        <!-- Responsive Settings Options -->
-        <div class="pt-4 pb-1 border-t border-gray-200 dark:border-gray-600">
-            <div class="px-4">
-                <div class="font-medium text-base text-gray-800 dark:text-gray-200">{{ Auth::user()->name }}</div>
-                <div class="font-medium text-sm text-gray-500">{{ Auth::user()->email }}</div>
-            </div>
-
-            <div class="mt-3 space-y-1">
-                <x-responsive-nav-link :href="route('profile')">
-                    {{ __('Profile') }}
-                </x-responsive-nav-link>
-
-                <x-responsive-nav-link :href="route('profile')">
-                    {{ __('Settings') }}
-                </x-responsive-nav-link>
-
-                <!-- Authentication -->
-                <form method="POST" action="{{ route('logout') }}">
-                    @csrf
-                    <x-responsive-nav-link :href="route('logout')" onclick="event.preventDefault(); this.closest('form').submit();">
-                        {{ __('Log Out') }}
-                    </x-responsive-nav-link>
-                </form>
+                        <!-- Authentication -->
+                        <form method="POST" action="{{ route("logout") }}">
+                            @csrf
+                            <x-dropdown-link
+                                :href="route('logout')"
+                                onclick="event.preventDefault();this.closest('form').submit();"
+                            >
+                                {{ __("Log Out") }}
+                            </x-dropdown-link>
+                        </form>
+                    </x-slot>
+                </x-dropdown>
             </div>
         </div>
     </div>

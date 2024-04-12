@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 
@@ -15,7 +16,6 @@ use Illuminate\Support\Str;
  * @property string $disk
  * @property Server $server
  * @property ?Site $site
- * @property string $content
  */
 class ServerLog extends AbstractModel
 {
@@ -33,6 +33,21 @@ class ServerLog extends AbstractModel
         'server_id' => 'integer',
         'site_id' => 'integer',
     ];
+
+    public static function boot(): void
+    {
+        parent::boot();
+
+        static::deleting(function (ServerLog $log) {
+            try {
+                if (Storage::disk($log->disk)->exists($log->name)) {
+                    Storage::disk($log->disk)->delete($log->name);
+                }
+            } catch (\Exception $e) {
+                Log::error($e->getMessage(), ['exception' => $e]);
+            }
+        });
+    }
 
     public function getRouteKey(): string
     {
@@ -61,12 +76,25 @@ class ServerLog extends AbstractModel
         }
     }
 
-    public function getContentAttribute(): ?string
+    public function getContent(): ?string
     {
         if (Storage::disk($this->disk)->exists($this->name)) {
             return Storage::disk($this->disk)->get($this->name);
         }
 
         return '';
+    }
+
+    public static function log(Server $server, string $type, string $content, ?Site $site = null): void
+    {
+        $log = new static([
+            'server_id' => $server->id,
+            'site_id' => $site?->id,
+            'name' => $server->id.'-'.strtotime('now').'-'.$type.'.log',
+            'type' => $type,
+            'disk' => config('core.logs_disk'),
+        ]);
+        $log->save();
+        $log->write($content);
     }
 }
